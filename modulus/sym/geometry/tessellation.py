@@ -239,7 +239,7 @@ class Tessellation(Geometry):
             Parameterization of geometry.
         """
         # read in mesh
-        mesh_gen = np_mesh.Mesh.from_multi_file('zw.stl')
+        mesh_gen = np_mesh.Mesh.from_multi_file(filename)
         full_mesh = np_mesh.Mesh(
             np.concatenate(
                 [x.data for x in mesh_gen]
