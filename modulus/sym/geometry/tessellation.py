@@ -70,46 +70,29 @@ class Tessellation(Geometry):
                     points_per_triangle,
                     np.arange(triangle_probabilities.shape[0] + 1) - 0.5,
                 )
-
+                
+                # isolate triangles with non-zero occupations
+                nonzero_triangles = np.nonzero(points_per_triangle)[0]
+                # compile list of indexes of triangles to be sampled
+                triangle_select_indices = np.repeat(nonzero_triangles, points_per_triangle[nonzero_triangles])
+                
                 # go through every triangle and sample it
-                invar = {
-                    "x": [],
-                    "y": [],
-                    "z": [],
-                    "normal_x": [],
-                    "normal_y": [],
-                    "normal_z": [],
-                    "area": [],
-                }
-                for index, nr_p in enumerate(
-                    points_per_triangle
-                ):  # TODO can be more efficent
-                    x, y, z = _sample_triangle(
-                        mesh.v0[index], mesh.v1[index], mesh.v2[index], nr_p
-                    )
-                    invar["x"].append(x)
-                    invar["y"].append(y)
-                    invar["z"].append(z)
-                    normal_scale = np.linalg.norm(mesh.normals[index])
-                    invar["normal_x"].append(
-                        np.full(x.shape, mesh.normals[index, 0]) / normal_scale
-                    )
-                    invar["normal_y"].append(
-                        np.full(x.shape, mesh.normals[index, 1]) / normal_scale
-                    )
-                    invar["normal_z"].append(
-                        np.full(x.shape, mesh.normals[index, 2]) / normal_scale
-                    )
-                    invar["area"].append(
-                        np.full(x.shape, triangle_areas[index] / x.shape[0])
-                    )
-                invar["x"] = np.concatenate(invar["x"], axis=0)
-                invar["y"] = np.concatenate(invar["y"], axis=0)
-                invar["z"] = np.concatenate(invar["z"], axis=0)
-                invar["normal_x"] = np.concatenate(invar["normal_x"], axis=0)
-                invar["normal_y"] = np.concatenate(invar["normal_y"], axis=0)
-                invar["normal_z"] = np.concatenate(invar["normal_z"], axis=0)
-                invar["area"] = np.concatenate(invar["area"], axis=0)
+                invar = {}
+
+                x, y, z = _sample_triangle(mesh.v0, mesh.v1, mesh.v2, triangle_select_indices)
+                invar["x"] = x
+                invar["y"] = y
+                invar["z"] = z
+                normal_scales = np.linalg.norm(mesh.normals[triangle_select_indices], axis = 1).reshape(-1,1)
+                select_normals = mesh.normals[triangle_select_indices]/normal_scales
+                invar["normal_x"] = select_normals[:,0].reshape(-1,1)
+                invar["normal_y"] = select_normals[:,1].reshape(-1,1)
+                invar["normal_z"] = select_normals[:,2].reshape(-1,1)
+                invar["area"] = np.divide(triangle_areas,
+                                        points_per_triangle,
+                                        out=np.zeros_like(triangle_areas),
+                                        where=points_per_triangle!=0
+                                        )[triangle_select_indices].reshape((-1,1))
 
                 # sample from the param ranges
                 params = parameterization.sample(nr_points, quasirandom=quasirandom)
@@ -219,44 +202,63 @@ class Tessellation(Geometry):
         mesh = np_mesh.Mesh.from_file(filename)
         return cls(mesh, airtight, parameterization)
 
+    @classmethod
+    def from_multi_stl(
+        cls,
+        filename,
+        airtight=True,
+        parameterization=Parameterization(),
+    ):
+        """
+        makes mesh from multi-STL file
+
+        Parameters
+        ----------
+        filename : str
+          filename of mesh.
+        airtight : bool
+          If the geometry is airtight or not. If false sample everywhere for interior.
+        parameterization : Parameterization
+            Parameterization of geometry.
+        """
+        # read in mesh
+        mesh_gen = np_mesh.Mesh.from_multi_file(filename)
+        full_mesh = np_mesh.Mesh(
+            np.concatenate(
+                [x.data for x in mesh_gen]
+            )
+        )
+        return cls(full_mesh, airtight, parameterization)
+
 
 # helper for sampling triangle
 def _sample_triangle(
-    v0, v1, v2, nr_points
+    v0, v1, v2, nzi
 ):  # ref https://math.stackexchange.com/questions/18686/uniform-random-point-in-triangle
-    r1 = np.random.uniform(0, 1, size=(nr_points, 1))
-    r2 = np.random.uniform(0, 1, size=(nr_points, 1))
+    # v0,v1,v2 are complete vertex vectors from the mesh;
+    # nzi is the array of indices of triangles to be sampled
+    v0, v1, v2 = v0[nzi], v1[nzi], v2[nzi]
+    n_triangle = v0.shape[0]
+    np.random.seed(0)
+    r1 = np.random.uniform(0, 1, size=(n_triangle, 1))
+    r2 = np.random.uniform(0, 1, size=(n_triangle, 1))
     s1 = np.sqrt(r1)
-    x = v0[0] * (1.0 - s1) + v1[0] * (1.0 - r2) * s1 + v2[0] * r2 * s1
-    y = v0[1] * (1.0 - s1) + v1[1] * (1.0 - r2) * s1 + v2[1] * r2 * s1
-    z = v0[2] * (1.0 - s1) + v1[2] * (1.0 - r2) * s1 + v2[2] * r2 * s1
-    return x, y, z
+    alpha = (1.0 - s1)
+    beta = (1.0 - r2)*s1
+    gamma = r2 * s1
+    X = v0 * alpha + v1 * beta + v2 * gamma
+    return X[:,0].reshape(-1,1), X[:,1].reshape(-1,1), X[:,2].reshape(-1,1)
 
 
 # area of array of triangles
 def _area_of_triangles(
     v0, v1, v2
 ):  # ref https://math.stackexchange.com/questions/128991/how-to-calculate-the-area-of-a-3d-triangle
-    a = np.sqrt(
-        (v0[:, 0] - v1[:, 0]) ** 2
-        + (v0[:, 1] - v1[:, 1]) ** 2
-        + (v0[:, 2] - v1[:, 2]) ** 2
-        + 1e-10
-    )
-    b = np.sqrt(
-        (v1[:, 0] - v2[:, 0]) ** 2
-        + (v1[:, 1] - v2[:, 1]) ** 2
-        + (v1[:, 2] - v2[:, 2]) ** 2
-        + 1e-10
-    )
-    c = np.sqrt(
-        (v0[:, 0] - v2[:, 0]) ** 2
-        + (v0[:, 1] - v2[:, 1]) ** 2
-        + (v0[:, 2] - v2[:, 2]) ** 2
-        + 1e-10
-    )
+    a = np.linalg.norm(v0-v1, axis = 1)
+    b = np.linalg.norm(v1-v2, axis = 1)
+    c = np.linalg.norm(v0-v2, axis = 1)
     s = (a + b + c) / 2
-    area = np.sqrt(s * (s - a) * (s - b) * (s - c) + 1e-10)
+    area = np.sqrt(s * (s - a) * (s - b) * (s - c))
     return area
 
 
