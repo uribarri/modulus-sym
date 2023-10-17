@@ -70,7 +70,12 @@ class Tessellation(Geometry):
                     points_per_triangle,
                     np.arange(triangle_probabilities.shape[0] + 1) - 0.5,
                 )
-
+                
+                # isolate triangles with non-zero occupations
+                nonzero_triangles = np.nonzero(points_per_triangle)[0]
+                # compile list of indexes of triangles to be sampled
+                triangle_select_indices = np.repeat(nonzero_triangles, points_per_triangle[nonzero_triangles])
+                
                 # go through every triangle and sample it
                 invar = {
                     "x": [],
@@ -81,35 +86,21 @@ class Tessellation(Geometry):
                     "normal_z": [],
                     "area": [],
                 }
-                for index, nr_p in enumerate(
-                    points_per_triangle
-                ):  # TODO can be more efficent
-                    x, y, z = _sample_triangle(
-                        mesh.v0[index], mesh.v1[index], mesh.v2[index], nr_p
-                    )
-                    invar["x"].append(x)
-                    invar["y"].append(y)
-                    invar["z"].append(z)
-                    normal_scale = np.linalg.norm(mesh.normals[index])
-                    invar["normal_x"].append(
-                        np.full(x.shape, mesh.normals[index, 0]) / normal_scale
-                    )
-                    invar["normal_y"].append(
-                        np.full(x.shape, mesh.normals[index, 1]) / normal_scale
-                    )
-                    invar["normal_z"].append(
-                        np.full(x.shape, mesh.normals[index, 2]) / normal_scale
-                    )
-                    invar["area"].append(
-                        np.full(x.shape, triangle_areas[index] / x.shape[0])
-                    )
-                invar["x"] = np.concatenate(invar["x"], axis=0)
-                invar["y"] = np.concatenate(invar["y"], axis=0)
-                invar["z"] = np.concatenate(invar["z"], axis=0)
-                invar["normal_x"] = np.concatenate(invar["normal_x"], axis=0)
-                invar["normal_y"] = np.concatenate(invar["normal_y"], axis=0)
-                invar["normal_z"] = np.concatenate(invar["normal_z"], axis=0)
-                invar["area"] = np.concatenate(invar["area"], axis=0)
+
+                x, y, z = _sample_triangle(mesh.v0, mesh.v1, mesh.v2, triangle_select_indices)
+                invar["x"].append(x)
+                invar["y"].append(y)
+                invar["z"].append(z)
+                normal_scales = np.linalg.norm(mesh.normals[triangle_select_indices], axis = 1).reshape(-1,1)
+                select_normals = mesh.normals[triangle_select_indices]/normal_scales
+                invar["normal_x"] = select_normals[:,0].reshape(-1,1)
+                invar["normal_y"] = select_normals[:,1].reshape(-1,1)
+                invar["normal_z"] = select_normals[:,2].reshape(-1,1)
+                invar["area"] = np.divide(triangle_areas,
+                                        points_per_triangle,
+                                        out=np.zeros_like(triangle_areas),
+                                        where=points_per_triangle!=0
+                                        )[triangle_select_indices].reshape((-1,1))
 
                 # sample from the param ranges
                 params = parameterization.sample(nr_points, quasirandom=quasirandom)
@@ -250,12 +241,10 @@ class Tessellation(Geometry):
 
 # helper for sampling triangle
 def _sample_triangle(
-    v0, v1, v2, nr_points
+    v0, v1, v2, nzi
 ):  # ref https://math.stackexchange.com/questions/18686/uniform-random-point-in-triangle
     # v0,v1,v2 are complete vertex vectors from the mesh;
-    # nr_points is an array of number of sample points per triangle
-    nz = np.nonzero(nr_points)[0]
-    nzi = np.repeat(nz, nr_points[nz])
+    # nzi is the array of indices of triangles to be sampled
     v0, v1, v2 = v0[nzi], v1[nzi], v2[nzi]
     n_triangle = v0.shape[0]
     np.random.seed(0)
