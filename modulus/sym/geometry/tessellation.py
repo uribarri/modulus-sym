@@ -77,20 +77,12 @@ class Tessellation(Geometry):
                 triangle_select_indices = np.repeat(nonzero_triangles, points_per_triangle[nonzero_triangles])
                 
                 # go through every triangle and sample it
-                invar = {
-                    "x": [],
-                    "y": [],
-                    "z": [],
-                    "normal_x": [],
-                    "normal_y": [],
-                    "normal_z": [],
-                    "area": [],
-                }
+                invar = {}
 
                 x, y, z = _sample_triangle(mesh.v0, mesh.v1, mesh.v2, triangle_select_indices)
-                invar["x"].append(x)
-                invar["y"].append(y)
-                invar["z"].append(z)
+                invar["x"] = x
+                invar["y"] = y
+                invar["z"] = z
                 normal_scales = np.linalg.norm(mesh.normals[triangle_select_indices], axis = 1).reshape(-1,1)
                 select_normals = mesh.normals[triangle_select_indices]/normal_scales
                 invar["normal_x"] = select_normals[:,0].reshape(-1,1)
@@ -262,26 +254,11 @@ def _sample_triangle(
 def _area_of_triangles(
     v0, v1, v2
 ):  # ref https://math.stackexchange.com/questions/128991/how-to-calculate-the-area-of-a-3d-triangle
-    a = np.sqrt(
-        (v0[:, 0] - v1[:, 0]) ** 2
-        + (v0[:, 1] - v1[:, 1]) ** 2
-        + (v0[:, 2] - v1[:, 2]) ** 2
-        + 1e-10
-    )
-    b = np.sqrt(
-        (v1[:, 0] - v2[:, 0]) ** 2
-        + (v1[:, 1] - v2[:, 1]) ** 2
-        + (v1[:, 2] - v2[:, 2]) ** 2
-        + 1e-10
-    )
-    c = np.sqrt(
-        (v0[:, 0] - v2[:, 0]) ** 2
-        + (v0[:, 1] - v2[:, 1]) ** 2
-        + (v0[:, 2] - v2[:, 2]) ** 2
-        + 1e-10
-    )
+    a = np.linalg.norm(v0-v1, axis = 1)
+    b = np.linalg.norm(v1-v2, axis = 1)
+    c = np.linalg.norm(v0-v2, axis = 1)
     s = (a + b + c) / 2
-    area = np.sqrt(s * (s - a) * (s - b) * (s - c) + 1e-10)
+    area = np.sqrt(s * (s - a) * (s - b) * (s - c))
     return area
 
 
