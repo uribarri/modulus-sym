@@ -219,18 +219,54 @@ class Tessellation(Geometry):
         mesh = np_mesh.Mesh.from_file(filename)
         return cls(mesh, airtight, parameterization)
 
+    @classmethod
+    def from_multi_stl(
+        cls,
+        filename,
+        airtight=True,
+        parameterization=Parameterization(),
+    ):
+        """
+        makes mesh from multi-STL file
+
+        Parameters
+        ----------
+        filename : str
+          filename of mesh.
+        airtight : bool
+          If the geometry is airtight or not. If false sample everywhere for interior.
+        parameterization : Parameterization
+            Parameterization of geometry.
+        """
+        # read in mesh
+        mesh_gen = np_mesh.Mesh.from_multi_file('zw.stl')
+        full_mesh = np_mesh.Mesh(
+            np.concatenate(
+                [x.data for x in mesh_gen]
+            )
+        )
+        return cls(full_mesh, airtight, parameterization)
+
 
 # helper for sampling triangle
 def _sample_triangle(
     v0, v1, v2, nr_points
 ):  # ref https://math.stackexchange.com/questions/18686/uniform-random-point-in-triangle
-    r1 = np.random.uniform(0, 1, size=(nr_points, 1))
-    r2 = np.random.uniform(0, 1, size=(nr_points, 1))
+    # v0,v1,v2 are complete vertex vectors from the mesh;
+    # nr_points is an array of number of sample points per triangle
+    nz = np.nonzero(nr_points)[0]
+    nzi = np.repeat(nz, nr_points[nz])
+    v0, v1, v2 = v0[nzi], v1[nzi], v2[nzi]
+    n_triangle = v0.shape[0]
+    np.random.seed(0)
+    r1 = np.random.uniform(0, 1, size=(n_triangle, 1))
+    r2 = np.random.uniform(0, 1, size=(n_triangle, 1))
     s1 = np.sqrt(r1)
-    x = v0[0] * (1.0 - s1) + v1[0] * (1.0 - r2) * s1 + v2[0] * r2 * s1
-    y = v0[1] * (1.0 - s1) + v1[1] * (1.0 - r2) * s1 + v2[1] * r2 * s1
-    z = v0[2] * (1.0 - s1) + v1[2] * (1.0 - r2) * s1 + v2[2] * r2 * s1
-    return x, y, z
+    alpha = (1.0 - s1)
+    beta = (1.0 - r2)*s1
+    gamma = r2 * s1
+    X = v0 * alpha + v1 * beta + v2 * gamma
+    return X[:,0].reshape(-1,1), X[:,1].reshape(-1,1), X[:,2].reshape(-1,1)
 
 
 # area of array of triangles
